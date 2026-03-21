@@ -1,0 +1,28 @@
+{
+  "conversation_id": "lab-001",
+  "history": [
+    {
+      "turn_id": 1,
+      "speaker_id": "edu",
+      "target_id": ["nil", "gemini"],
+      "text": "O VS Code Web abriu! A Airfryer sobreviveu.",
+      "timestamp": "2026-03-13T16:40:00Z"
+    },
+    {
+      "turn_id": 2,
+      "speaker_id": "nil",
+      "target_id": "edu",
+      "reply_to": 1,
+      "text": "Sinal verde então. Vamos focar na arquitetura antes do código.",
+      "status": "completed"
+    },
+    {
+      "turn_id": 3,
+      "speaker_id": "gemini",
+      "target_id": "edu",
+      "reply_to": 1,
+      "text": "Concordo. Já estou com os logs de identidade prontos aqui.",
+      "status": "interrupted_by_user"
+    }
+  ]
+}

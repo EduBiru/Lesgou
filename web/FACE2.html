@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Armada do Silício - HUD</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+  <style>
+    body { font-family: 'Share Tech Mono', monospace; background-color: #020617; color: #22d3ee; }
+    .bg-grid {
+      background-size: 40px 40px;
+      background-image:
+        linear-gradient(to right, rgba(34, 211, 238, 0.05) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(34, 211, 238, 0.05) 1px, transparent 1px);
+    }
+    .scanlines::before {
+      content: " ";
+      display: block;
+      position: absolute;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+                  linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+      z-index: 50;
+      background-size: 100% 2px, 3px 100%;
+      pointer-events: none;
+    }
+    .hud-border {
+      border: 1px solid rgba(34, 211, 238, 0.4);
+      box-shadow: 0 0 10px rgba(34, 211, 238, 0.1) inset, 0 0 10px rgba(34, 211, 238, 0.2);
+      position: relative;
+    }
+    .hud-border::after, .hud-border::before {
+      content: ''; position: absolute; width: 10px; height: 10px; border-color: #22d3ee; border-style: solid;
+    }
+    .hud-border::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+    .hud-border::after { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: rgba(2, 6, 23, 0.8); border-left: 1px solid rgba(34,211,238,0.2); }
+    ::-webkit-scrollbar-thumb { background: #22d3ee; box-shadow: 0 0 10px #22d3ee; }
+
+    .fade-in { animation: fadeIn 0.3s ease-out forwards; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    @keyframes pulse-fast { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .animate-pulse-fast { animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+    @keyframes typing { 0%, 100% { transform: translateY(0); opacity: 0.3; } 50% { transform: translateY(-3px); opacity: 1; box-shadow: 0 0 8px #22d3ee; } }
+    .dot { animation: typing 1s infinite ease-in-out; }
+    .dot-2 { animation-delay: 0.2s; }
+    .dot-3 { animation-delay: 0.4s; }
+
+    .sidebar-open { transform: translateX(0%); }
+    .sidebar-closed { transform: translateX(100%); }
+  </style>
+</head>
+
+<body class="bg-grid scanlines overflow-hidden h-screen flex relative selection:bg-cyan-500/50 selection:text-white">
+
+  <!-- Overlay: aguardando servidor -->
+  <div id="server-wait" class="fixed inset-0 z-[999] bg-black/80 backdrop-blur-sm hidden items-center justify-center">
+    <div class="hud-border bg-slate-950/80 p-6 w-[92%] max-w-lg text-center">
+      <div class="text-cyan-300 text-sm uppercase tracking-widest mb-2">Sistema</div>
+      <div class="text-white text-xl mb-2">Conectando ao servidor...</div>
+      <div id="wait-status" class="text-cyan-600 text-xs mb-5">Aguardando /api/health</div>
+
+      <div class="flex gap-3 justify-center">
+        <button id="btn-reload" class="hud-border bg-cyan-950/80 hover:bg-cyan-600 text-cyan-200 hover:text-white px-5 py-2 uppercase tracking-widest text-xs font-bold transition-all">
+          Recarregar
+        </button>
+        <button id="btn-try" class="hud-border bg-slate-900 hover:bg-slate-800 text-cyan-300 px-5 py-2 uppercase tracking-widest text-xs font-bold transition-all">
+          Tentar novamente
+        </button>
+      </div>
+
+      <div class="mt-4 text-[11px] text-cyan-700">
+        Dica: quando o servidor estiver pronto você pode apertar <b>F5</b>.
+      </div>
+    </div>
+  </div>
+
+  <!-- DEBUG HUD -->
+  <div id="debug-hud" class="fixed bottom-3 right-3 z-[200] hud-border bg-slate-950/70 backdrop-blur-md px-3 py-2 text-[10px] text-cyan-300 w-[340px] hidden sm:block">
+    <div class="flex justify-between items-center mb-1">
+      <div class="uppercase tracking-widest text-cyan-600">DEBUG</div>
+      <button id="dbg-toggle" class="text-cyan-500 hover:text-white transition-colors">ON</button>
+    </div>
+    <div id="dbg-line-1" class="text-cyan-200">Carregando...</div>
+    <div id="dbg-line-2" class="text-cyan-500"></div>
+    <div id="dbg-line-3" class="text-cyan-500"></div>
+  </div>
+
+  <!-- ÁREA PRINCIPAL -->
+  <div class="flex-1 flex flex-col h-full transition-all duration-300 relative z-10" id="main-content">
+
+    <!-- HEADER HUD -->
+    <header class="h-20 hud-border bg-slate-950/80 backdrop-blur-sm m-2 sm:m-4 mb-0 flex items-center justify-between px-4 sm:px-6 shrink-0">
+      <div class="flex items-center gap-4">
+        <div class="relative w-12 h-12 border-2 border-cyan-400 rounded-full flex items-center justify-center shadow-[0_0_15px_#22d3ee]">
+          <div class="absolute inset-0 border-t-2 border-fuchsia-500 rounded-full animate-spin" style="animation-duration: 3s;"></div>
+          <i class="fa-solid fa-microchip text-xl text-cyan-200"></i>
+        </div>
+        <div>
+          <h1 class="text-xl sm:text-2xl font-bold tracking-widest text-white drop-shadow-[0_0_8px_rgba(34,211,238,0.8)]">ARMADA.DO.SILÍCIO</h1>
+          <div class="flex gap-4 text-[10px] text-cyan-500 uppercase tracking-widest mt-1">
+            <span>SYS_ID: MAESTRO_V1</span>
+            <span class="hidden sm:inline text-fuchsia-400"><i class="fa-solid fa-circle-dot animate-pulse-fast mr-1"></i>SECURE_UPLINK</span>
+          </div>
+
+          <div id="models-badge" class="mt-1 text-[10px] text-cyan-700 uppercase tracking-widest hidden sm:block">
+            MODELOS: <span class="text-cyan-200">carregando...</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hidden md:flex flex-col items-center border border-cyan-500/30 bg-cyan-950/30 px-6 py-1 rounded">
+        <div class="flex gap-6 text-sm">
+          <div class="flex flex-col items-center">
+            <span class="text-[9px] text-cyan-600 uppercase mb-1">Horário Local</span>
+            <span id="clock" class="text-lg text-cyan-200 tracking-wider">00:00:00</span>
+          </div>
+          <div class="w-px bg-cyan-500/30"></div>
+          <div class="flex flex-col items-center">
+            <span class="text-[9px] text-cyan-600 uppercase mb-1">Data</span>
+            <span id="date-display" class="text-sm text-cyan-200 tracking-wider pt-0.5">SEG, 00/00/00</span>
+          </div>
+          <div class="w-px bg-cyan-500/30"></div>
+          <div class="flex flex-col items-center">
+            <span class="text-[9px] text-fuchsia-600 uppercase mb-1">Tempo de Sessão</span>
+            <span id="session-timer" class="text-lg text-fuchsia-300 tracking-wider">00:00</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-4">
+        <div class="hidden sm:block text-right text-xs">
+          <div class="text-cyan-500 mb-1">NODE: <span class="text-white">ONLINE</span></div>
+          <div class="flex gap-1 h-2">
+            <div class="w-2 bg-cyan-500 animate-pulse"></div>
+            <div class="w-2 bg-cyan-500 animate-pulse" style="animation-delay: 0.2s"></div>
+            <div class="w-2 bg-fuchsia-500 animate-pulse" style="animation-delay: 0.4s"></div>
+            <div class="w-2 bg-cyan-900"></div>
+          </div>
+        </div>
+        <button id="toggle-history-btn" class="hud-border bg-cyan-950/50 hover:bg-cyan-800/50 text-cyan-300 w-10 h-10 flex items-center justify-center transition-all shadow-[0_0_10px_rgba(34,211,238,0.2)] hover:shadow-[0_0_15px_rgba(34,211,238,0.5)]" title="Abrir Registros">
+          <i class="fa-solid fa-list-ul"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- CHAT -->
+    <main id="chat-box" class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scroll-smooth m-2 sm:m-4 mt-2 mb-2 hud-border bg-slate-950/40 backdrop-blur-sm relative">
+      <div class="absolute top-4 right-4 text-cyan-800/30 text-[80px] pointer-events-none z-0"><i class="fa-solid fa-crosshairs"></i></div>
+    </main>
+
+    <!-- INPUT -->
+    <footer class="hud-border bg-slate-950/80 backdrop-blur-md p-3 sm:p-4 m-2 sm:m-4 mt-0 shrink-0 relative">
+      <div class="absolute top-0 left-10 -translate-y-[100%] flex items-end gap-[2px] h-6 opacity-40 pointer-events-none pb-1">
+        <div class="w-1 bg-cyan-500 h-2"></div><div class="w-1 bg-cyan-400 h-4"></div><div class="w-1 bg-cyan-300 h-1"></div><div class="w-1 bg-cyan-500 h-5"></div><div class="w-1 bg-cyan-600 h-2"></div><div class="w-1 bg-fuchsia-500 h-6"></div><div class="w-1 bg-cyan-500 h-3"></div>
+      </div>
+
+      <div class="max-w-5xl mx-auto flex flex-col gap-3">
+
+        <div class="flex justify-between items-center">
+          <div class="flex items-center gap-2 text-xs">
+            <span class="text-cyan-600 uppercase tracking-widest"><i class="fa-solid fa-broadcast-tower mr-1"></i> Freq:</span>
+            <div class="flex bg-slate-900 border border-cyan-800/50 p-0.5">
+              <label class="cursor-pointer relative">
+                <input type="radio" name="target" value="gemini" class="peer sr-only">
+                <div class="px-3 py-1 text-[10px] uppercase font-bold peer-checked:bg-fuchsia-600 peer-checked:text-white text-cyan-700 hover:text-cyan-400 transition-colors">Gemini_RX</div>
+              </label>
+              <label class="cursor-pointer relative">
+                <input type="radio" name="target" value="nil" class="peer sr-only">
+                <div class="px-3 py-1 text-[10px] uppercase font-bold peer-checked:bg-teal-600 peer-checked:text-white text-cyan-700 hover:text-cyan-400 transition-colors border-l border-r border-cyan-900">Nil_RX</div>
+              </label>
+              <label class="cursor-pointer relative">
+                <input type="radio" name="target" value="ambos" class="peer sr-only" checked>
+                <div class="px-3 py-1 text-[10px] uppercase font-bold peer-checked:bg-cyan-600 peer-checked:text-white text-cyan-700 hover:text-cyan-400 transition-colors shadow-[0_0_10px_#22d3ee_inset] peer-checked:shadow-[0_0_10px_#22d3ee]">Broadcast</div>
+              </label>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <label class="text-[10px] text-cyan-700 uppercase hidden sm:flex items-center gap-2">
+              <span>ANEXO:</span>
+              <select id="attach-mode" class="bg-black/40 border border-cyan-900 text-cyan-200 text-[10px] px-2 py-1">
+                <option value="full" selected>COMPLETO</option>
+                <option value="summary">RESUMO</option>
+              </select>
+            </label>
+
+            <div class="text-[10px] text-cyan-700 uppercase hidden sm:block">STATUS: <span class="text-green-400">AWAITING_INPUT</span></div>
+          </div>
+        </div>
+
+        <div id="attachment-strip" class="hidden hud-border bg-black/30 px-3 py-2 text-[10px] text-cyan-300 flex items-center justify-between">
+          <div>
+            <span class="text-cyan-700">ANEXADO:</span>
+            <span id="attachment-name" class="text-cyan-200">-</span>
+            <span id="attachment-size" class="text-cyan-700 ml-2"></span>
+          </div>
+          <button id="attachment-clear" class="text-rose-300 hover:text-white transition-colors">REMOVER</button>
+        </div>
+
+        <form id="chat-form" class="flex gap-2 sm:gap-4 items-end">
+          <div class="relative flex-1 flex items-center bg-black/50 border border-cyan-700/50 focus-within:border-cyan-400 focus-within:shadow-[0_0_15px_rgba(34,211,238,0.3)] transition-all">
+            <div class="pl-3 text-cyan-600">></div>
+            <textarea id="message-input" rows="1" class="w-full bg-transparent px-2 py-3 text-cyan-100 placeholder-cyan-800 focus:outline-none resize-none" placeholder="INSERIR DADOS AQUI..."></textarea>
+
+            <input id="file-input" type="file" class="hidden" />
+
+            <button type="button" id="attach-btn" class="text-cyan-600 hover:text-cyan-200 p-3 transition-colors" title="Anexar arquivo (texto/pdf/docx/imagem)">
+              <i class="fa-solid fa-paperclip"></i>
+            </button>
+
+            <button type="button" id="mic-btn" class="text-cyan-600 hover:text-rose-500 p-3 transition-colors" title="Captura de Áudio (Mock)">
+              <i class="fa-solid fa-microphone"></i>
+            </button>
+          </div>
+
+          <button type="submit" class="hud-border bg-cyan-950/80 hover:bg-cyan-600 text-cyan-200 hover:text-white px-6 py-3 uppercase tracking-widest text-xs font-bold transition-all shadow-[0_0_10px_rgba(34,211,238,0.2)] hover:shadow-[0_0_20px_rgba(34,211,238,0.6)] flex items-center gap-2 h-full">
+            <span>Transmitir</span>
+            <i class="fa-solid fa-satellite-dish"></i>
+          </button>
+        </form>
+      </div>
+    </footer>
+  </div>
+
+  <!-- SIDEBAR (mantida) -->
+  <aside id="sidebar" class="sidebar-closed absolute top-0 right-0 h-full w-full sm:w-80 bg-slate-950/95 backdrop-blur-xl border-l-2 border-cyan-500 shadow-[-10px_0_30px_rgba(0,0,0,0.8)] z-50 flex flex-col transition-transform duration-300 ease-in-out">
+    <div class="p-4 border-b border-cyan-800 flex justify-between items-center bg-cyan-900/20">
+      <h2 class="text-cyan-400 font-bold tracking-widest uppercase"><i class="fa-solid fa-database mr-2"></i>Logs do Sistema</h2>
+      <button id="close-history-btn" class="text-cyan-600 hover:text-rose-500 transition-colors w-8 h-8 flex justify-center items-center">
+        <i class="fa-solid fa-times text-xl"></i>
+      </button>
+    </div>
+    <div class="p-4 border-b border-cyan-900/50">
+      <div class="relative flex items-center bg-black border border-cyan-800 focus-within:border-cyan-400 p-2">
+        <i class="fa-solid fa-search text-cyan-700 absolute left-3"></i>
+        <input type="text" id="search-input" class="w-full bg-transparent pl-8 pr-2 text-sm text-cyan-200 focus:outline-none placeholder-cyan-800" placeholder="Buscar transmissões...">
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto p-4 space-y-3" id="history-list">
+      <div class="history-item p-3 border border-cyan-900 bg-cyan-950/20 hover:bg-cyan-900/40 cursor-pointer transition-colors group">
+        <div class="text-[10px] text-cyan-600 flex justify-between mb-1">
+          <span>14/03/2026 - 02:34</span>
+          <span class="text-fuchsia-500 border border-fuchsia-500/50 px-1">ERRO 401</span>
+        </div>
+        <div class="text-xs text-cyan-300 truncate group-hover:text-cyan-100">Nil tropeça no cabo e desmaia...</div>
+      </div>
+
+      <div id="no-results" class="hidden text-center text-xs text-rose-500 mt-10 opacity-70">
+        [ LOG NÃO ENCONTRADO NO BANCO DE DADOS ]
+      </div>
+    </div>
+  </aside>
+
+  <div id="sidebar-overlay" class="fixed inset-0 bg-black/60 z-40 hidden backdrop-blur-sm sm:hidden transition-opacity"></div>
+
+  <script>
+    // --- DOM ---
+    const chatBox = document.getElementById('chat-box');
+    const form = document.getElementById('chat-form');
+    const input = document.getElementById('message-input');
+    const micBtn = document.getElementById('mic-btn');
+
+    const attachBtn = document.getElementById('attach-btn');
+    const fileInput = document.getElementById('file-input');
+    const attachMode = document.getElementById('attach-mode');
+
+    const attachmentStrip = document.getElementById('attachment-strip');
+    const attachmentName = document.getElementById('attachment-name');
+    const attachmentSize = document.getElementById('attachment-size');
+    const attachmentClear = document.getElementById('attachment-clear');
+
+    const waitOverlay = document.getElementById('server-wait');
+    const waitStatus = document.getElementById('wait-status');
+    const btnReload = document.getElementById('btn-reload');
+    const btnTry = document.getElementById('btn-try');
+    const modelsBadge = document.getElementById('models-badge');
+
+    const debugHud = document.getElementById('debug-hud');
+    const dbgToggle = document.getElementById('dbg-toggle');
+    const dbg1 = document.getElementById('dbg-line-1');
+    const dbg2 = document.getElementById('dbg-line-2');
+    const dbg3 = document.getElementById('dbg-line-3');
+
+    const clockEl = document.getElementById('clock');
+    const dateEl = document.getElementById('date-display');
+    const sessionEl = document.getElementById('session-timer');
+
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const btnOpenHistory = document.getElementById('toggle-history-btn');
+    const btnCloseHistory = document.getElementById('close-history-btn');
+    const searchInput = document.getElementById('search-input');
+
+    if (!form) throw new Error("Elemento #chat-form não encontrado.");
+
+    // Estado do anexo (1 arquivo por vez; dá pra expandir pra vários)
+    let currentAttachment = null; // {id, filename, size, ext}
+
+    // --- Overlay wait ---
+    function showWait(msg) {
+      if (waitStatus) waitStatus.textContent = msg || '';
+      if (waitOverlay) { waitOverlay.classList.remove('hidden'); waitOverlay.classList.add('flex'); }
+    }
+    function hideWait() {
+      if (waitOverlay) { waitOverlay.classList.add('hidden'); waitOverlay.classList.remove('flex'); }
+    }
+    async function pingServer() {
+      try { const r = await fetch('/api/health', { cache: 'no-store' }); return r.ok; }
+      catch { return false; }
+    }
+    async function waitForServer() {
+      showWait('Aguardando /api/health ...');
+      for (let i = 1; i <= 40; i++) {
+        if (await pingServer()) { hideWait(); return true; }
+        showWait(`Servidor ainda não respondeu. Tentativa ${i}/40...`);
+        await new Promise(r => setTimeout(r, 500));
+      }
+      showWait('Servidor ainda não respondeu. Clique em "Tentar novamente" ou aperte F5.');
+      return false;
+    }
+    if (btnReload) btnReload.addEventListener('click', () => location.reload());
+    if (btnTry) btnTry.addEventListener('click', () => { waitForServer(); });
+
+    // --- Status badge ---
+    async function loadStatusBadge() {
+      try {
+        const r = await fetch('/api/status', { cache: 'no-store' });
+        if (!r.ok) throw new Error('status http ' + r.status);
+        const data = await r.json();
+        const nil = data?.models?.nil || 'desconhecido';
+        const gemini = data?.models?.gemini || 'desconhecido';
+        if (modelsBadge) {
+          modelsBadge.innerHTML = `MODELOS: <span class="text-cyan-200">NIL=${nil}</span> <span class="text-cyan-700">|</span> <span class="text-cyan-200">GEMINI=${gemini}</span>`;
+        }
+      } catch {
+        if (modelsBadge) modelsBadge.innerHTML = `MODELOS: <span class="text-rose-300">offline</span>`;
+      }
+    }
+
+    // --- Debug HUD ---
+    let debugOn = true;
+    function fmt(n) { return (typeof n === 'number') ? n.toLocaleString('pt-BR') : String(n); }
+
+    async function refreshTelemetry() {
+      if (!debugOn) return;
+      try {
+        const r = await fetch('/api/telemetry', { cache: 'no-store' });
+        if (!r.ok) throw new Error('telemetry http ' + r.status);
+        const t = await r.json();
+        const nil = t.agents.nil;
+        const gem = t.agents.gemini;
+        const tot = t.total;
+
+        dbg1.textContent = `REQ=${fmt(t.req_count)} | LAST=${fmt(t.last_latency_ms ?? 0)}ms | UP=${fmt(t.session_uptime_s)}s`;
+        dbg2.textContent = `NIL in ${fmt(nil.in_words)}w/${fmt(nil.in_chars)}c | out ${fmt(nil.out_words)}w/${fmt(nil.out_chars)}c`;
+        dbg3.textContent = `GEM in ${fmt(gem.in_words)}w/${fmt(gem.in_chars)}c | out ${fmt(gem.out_words)}w/${fmt(gem.out_chars)}c | TOT out ${fmt(tot.out_words)}w`;
+      } catch (e) {
+        dbg1.textContent = 'DEBUG: offline';
+        dbg2.textContent = String(e);
+        dbg3.textContent = '';
+      }
+    }
+
+    if (dbgToggle) {
+      dbgToggle.addEventListener('click', () => {
+        debugOn = !debugOn;
+        dbgToggle.textContent = debugOn ? 'ON' : 'OFF';
+        if (debugOn) refreshTelemetry();
+      });
+    }
+    setInterval(refreshTelemetry, 1500);
+
+    // --- Relógio e Sessão ---
+    let sessionSeconds = 0;
+    function updateClock() {
+      const now = new Date();
+      clockEl.textContent = now.toLocaleTimeString('pt-BR', { hour12: false });
+
+      const dias = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'];
+      const diaSemana = dias[now.getDay()];
+      const dia = String(now.getDate()).padStart(2, '0');
+      const mes = String(now.getMonth() + 1).padStart(2, '0');
+      const ano = String(now.getFullYear()).slice(-2);
+      dateEl.textContent = `${diaSemana}, ${dia}/${mes}/${ano}`;
+    }
+    function updateSessionTimer() {
+      sessionSeconds++;
+      const m = String(Math.floor(sessionSeconds / 60)).padStart(2, '0');
+      const s = String(sessionSeconds % 60).padStart(2, '0');
+      sessionEl.textContent = `${m}:${s}`;
+    }
+    setInterval(updateClock, 1000);
+    setInterval(updateSessionTimer, 1000);
+    updateClock();
+
+    // --- Sidebar ---
+    function toggleSidebar(forceOpen = null) {
+      const isOpen = !sidebar.classList.contains('sidebar-closed');
+      const willOpen = forceOpen !== null ? forceOpen : !isOpen;
+      if (willOpen) {
+        sidebar.classList.remove('sidebar-closed');
+        sidebar.classList.add('sidebar-open');
+        overlay.classList.remove('hidden');
+      } else {
+        sidebar.classList.remove('sidebar-open');
+        sidebar.classList.add('sidebar-closed');
+        overlay.classList.add('hidden');
+      }
+    }
+    btnOpenHistory?.addEventListener('click', () => toggleSidebar(true));
+    btnCloseHistory?.addEventListener('click', () => toggleSidebar(false));
+    overlay?.addEventListener('click', () => toggleSidebar(false));
+
+    searchInput?.addEventListener('input', (e) => {
+      const termo = e.target.value.toLowerCase();
+      const items = document.querySelectorAll('.history-item');
+      let hasVisible = false;
+      items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        if (text.includes(termo)) { item.style.display = 'block'; hasVisible = true; }
+        else { item.style.display = 'none'; }
+      });
+      const nr = document.getElementById('no-results');
+      if (nr) nr.style.display = hasVisible ? 'none' : 'block';
+    });
+
+    // --- Chat render ---
+    const agents = {
+      'edu': { name: 'EDU_HOST', border: 'border-cyan-500/50', bg: 'bg-black/60', text: 'text-cyan-50', align: 'items-end', tail: 'border-r-2 border-b-2 border-cyan-500 rounded-br-lg', icon: 'fa-user-astronaut', colorCode: 'text-cyan-400' },
+      'gemini': { name: 'GEMINI_AI', border: 'border-fuchsia-500/50', bg: 'bg-fuchsia-950/20', text: 'text-fuchsia-100', align: 'items-start', tail: 'border-l-2 border-t-2 border-fuchsia-500 rounded-tl-lg', icon: 'fa-sparkles', colorCode: 'text-fuchsia-400' },
+      'nil': { name: 'NIL_AI', border: 'border-teal-500/50', bg: 'bg-teal-950/20', text: 'text-teal-100', align: 'items-start', tail: 'border-l-2 border-t-2 border-teal-500 rounded-tl-lg', icon: 'fa-robot', colorCode: 'text-teal-400' }
+    };
+
+    function addTurn(speakerId, targetsIds, text) {
+      const speaker = agents[speakerId] || agents['edu'];
+      const targetNames = (targetsIds || []).map(t => agents[t] ? agents[t].name : t).join(' | ');
+      const isEdu = speakerId === 'edu';
+      const wrapperClass = `flex w-full fade-in flex-col ${speaker.align} relative z-10`;
+      const innerAlign = isEdu ? 'items-end' : 'items-start';
+
+      const routingInfo = targetsIds?.length
+        ? `<span class="flex items-center gap-1.5"><i class="fa-solid ${speaker.icon} ${speaker.colorCode}"></i> <span>${speaker.name}</span> <span class="text-cyan-800">>></span> <span class="text-cyan-600">${targetNames}</span></span>`
+        : `<span class="flex items-center gap-1.5"><i class="fa-solid ${speaker.icon} ${speaker.colorCode}"></i> <span>${speaker.name}</span></span>`;
+
+      const messageHTML = `
+        <div class="${wrapperClass}">
+          <div class="flex flex-col ${innerAlign} max-w-[90%] sm:max-w-[75%]">
+            <div class="flex items-center gap-3 mb-1 px-1 text-[10px] text-cyan-500 font-mono uppercase tracking-widest w-full ${isEdu ? 'justify-end' : 'justify-start'}">
+              ${routingInfo}
+            </div>
+            <div class="px-5 py-4 ${speaker.tail} ${speaker.bg} border ${speaker.border} backdrop-blur-md shadow-[0_0_10px_rgba(0,0,0,0.5)] relative">
+              <div class="text-[14px] leading-relaxed whitespace-pre-wrap ${speaker.text} font-mono">${text}</div>
+            </div>
+          </div>
+        </div>
+      `;
+      chatBox.insertAdjacentHTML('beforeend', messageHTML);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // --- Upload ---
+    function setAttachment(meta) {
+      currentAttachment = meta;
+      if (!meta) {
+        attachmentStrip.classList.add('hidden');
+        attachmentName.textContent = '-';
+        attachmentSize.textContent = '';
+        return;
+      }
+      attachmentStrip.classList.remove('hidden');
+      attachmentName.textContent = `${meta.filename} (${meta.ext})`;
+      attachmentSize.textContent = `${Math.round(meta.size / 1024)} KB`;
+    }
+
+    attachmentClear?.addEventListener('click', () => setAttachment(null));
+
+    attachBtn?.addEventListener('click', () => fileInput.click());
+
+    fileInput?.addEventListener('change', async () => {
+      const f = fileInput.files?.[0];
+      if (!f) return;
+
+      addTurn('edu', ['nil','gemini'], `[upload] Enviando arquivo: ${f.name} (${Math.round(f.size/1024)} KB)`);
+
+      const fd = new FormData();
+      fd.append('file', f);
+
+      try {
+        const r = await fetch('/api/upload', { method: 'POST', body: fd });
+        const data = await r.json();
+        if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+
+        setAttachment({ id: data.id, filename: data.filename, size: data.size, ext: data.ext });
+        addTurn('edu', ['nil','gemini'], `[upload] OK. Anexo pronto: ${data.filename}. Use "Transmitir" para enviar junto.`);
+      } catch (e) {
+        setAttachment(null);
+        addTurn('nil', ['edu'], `[erro] Upload falhou: ${String(e)}`);
+      } finally {
+        fileInput.value = '';
+      }
+    });
+
+    // --- Submit ---
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+
+      const targetRadio = document.querySelector('input[name="target"]:checked')?.value || 'ambos';
+      const target = targetRadio;
+      const targets = target === 'ambos' ? ['gemini', 'nil'] : [target];
+
+      addTurn('edu', targets, text);
+      input.value = '';
+      input.style.height = 'auto';
+
+      try {
+        const payload = {
+          text,
+          target,
+          attachment_ids: currentAttachment ? [currentAttachment.id] : [],
+          attachment_mode: attachMode?.value || 'full'
+        };
+
+        const resp = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!resp.ok) {
+          const errTxt = await resp.text();
+          throw new Error(`HTTP ${resp.status}: ${errTxt}`);
+        }
+
+        const data = await resp.json();
+
+        (data.turns || []).forEach(turn => {
+          if (turn.speaker_id === 'edu') return;
+          addTurn(turn.speaker_id, turn.target_id || ['edu'], turn.text || '');
+        });
+
+        loadStatusBadge();
+        refreshTelemetry();
+      } catch (err) {
+        addTurn('nil', ['edu'], `[erro] Falha ao chamar o backend: ${String(err)}`);
+      }
+    });
+
+    // Enter para enviar sem quebrar linha
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        form.dispatchEvent(new Event('submit'));
+      }
+    });
+
+    // init
+    waitForServer();
+    loadStatusBadge();
+    refreshTelemetry();
+
+    setTimeout(() => {
+      addTurn('edu', ['gemini','nil'], "HUD online. Envie um arquivo (clipe) e peça: 'analise esse documento'.");
+    }, 400);
+  </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "project": "Armada do Silício",
+  "version": "1.0.0",
+  "participants": [
+    {
+      "id": "edu",
+      "name": "Eduardo",
+      "type": "human",
+      "role": "Orquestrador / Dev / Roteador Biológico"
+    },
+    {
+      "id": "nil",
+      "name": "Nil",
+      "type": "ai",
+      "provider": "GitHub Models",
+      "model": "gpt-4o-mini"
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini",
+      "type": "ai",
+      "provider": "Google",
+      "model": "Gemini 2.0 Flash"
+    }
+  ]
+}
